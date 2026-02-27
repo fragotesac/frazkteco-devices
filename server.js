@@ -382,12 +382,14 @@ app.get('/slk20r/diagnostico', (req, res) => {
   const { execSync } = require('child_process');
   let dlls = [];
   try {
-    const out = execSync('dir C:\Windows\System32\*zk*.dll /b 2>nul & dir C:\Windows\System32\*fp*.dll /b 2>nul & dir C:\Windows\SysWOW64\*zk*.dll /b 2>nul & dir C:\Windows\SysWOW64\*fp*.dll /b 2>nul', { shell: 'cmd.exe', encoding: 'utf8' });
-    dlls = out.trim().split('
-').map(s => s.trim()).filter(Boolean);
+    const cmd = 'dir C:\\Windows\\System32\\*zk*.dll /b 2>nul & dir C:\\Windows\\System32\\*fp*.dll /b 2>nul & dir C:\\Windows\\SysWOW64\\*zk*.dll /b 2>nul & dir C:\\Windows\\SysWOW64\\*fp*.dll /b 2>nul';
+    const out = execSync(cmd, { shell: 'cmd.exe', encoding: 'utf8' });
+    dlls = out.trim().split(/\r?\n/).map(s => s.trim()).filter(Boolean);
   } catch {}
-  res.json({ sdkDisponible: slk20r.disponible(), dlls, mensaje: dlls.length ? 'DLLs encontrados' : 'Ningún DLL zk/fp encontrado en System32' });
+  const msg = dlls.length ? 'DLLs encontrados' : 'Ningun DLL zk/fp encontrado en System32';
+  res.json({ sdkDisponible: slk20r.disponible(), dlls, mensaje: msg });
 });
+
 
 app.post('/slk20r/cerrar', (req, res) => {
   if (slkHandle) {
