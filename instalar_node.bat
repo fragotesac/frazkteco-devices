@@ -7,7 +7,6 @@ set NODE_ARCH=x64
 set NODE_ZIP=node-v%NODE_VERSION%-win-%NODE_ARCH%.zip
 set NODE_URL=https://nodejs.org/dist/v%NODE_VERSION%/%NODE_ZIP%
 
-:: Todas las rutas son relativas al .bat, sin importar desde donde se ejecute
 set BAT_DIR=%~dp0
 set RUNTIME_DIR=%BAT_DIR%runtime
 set INSTALL_DIR=%RUNTIME_DIR%\node
@@ -48,11 +47,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1_DOWNLOAD%"
 del "%PS1_DOWNLOAD%" >nul 2>&1
 
 if not exist "%RUNTIME_DIR%\%NODE_ZIP%" (
-    echo.
     echo  [ERROR] No se pudo descargar Node.js.
-    echo          Verifica tu conexion a internet.
-    pause
-    exit /b 1
+    pause & exit /b 1
 )
 echo  [OK] Descarga completada.
 echo.
@@ -77,36 +73,26 @@ del "%RUNTIME_DIR%\%NODE_ZIP%" >nul 2>&1
 
 if not exist "%INSTALL_DIR%\node.exe" (
     echo  [ERROR] La extraccion fallo.
-    pause
-    exit /b 1
+    pause & exit /b 1
 )
-echo  [OK] Archivos extraidos.
-echo.
 
-:: ─── Verificar ────────────────────────────────────────────────────────────────
 echo  [4/4] Verificando instalacion...
 "%INSTALL_DIR%\node.exe" --version
 "%INSTALL_DIR%\npm.cmd"  --version
-echo  [OK] Node.js y npm listos.
+echo  [OK] Node.js listo.
 echo.
 
 :: ─── Generar iniciar.bat ──────────────────────────────────────────────────────
 :generar_iniciar
 echo  Generando iniciar.bat...
 
-:: IMPORTANTE: el iniciar.bat usa %%~dp0 para ubicarse a si mismo.
-:: Nunca usar rutas absolutas aqui — el proyecto puede moverse de carpeta.
-
 > "%BAT_DIR%iniciar.bat" (
     echo @echo off
     echo setlocal
     echo title ZKControl Server
     echo.
-    echo :: Ruta al Node.js portable ^(relativa a este .bat^)
     echo set "NODE_BIN=%%~dp0runtime\node"
     echo set "PATH=%%NODE_BIN%%;%%PATH%%"
-    echo.
-    echo :: Ir a la carpeta donde esta este .bat ^(donde vive server.js^)
     echo cd /d "%%~dp0"
     echo.
     echo echo.
@@ -114,44 +100,38 @@ echo  Generando iniciar.bat...
     echo echo   ZKControl - Iniciando servidor...
     echo echo  ===============================================
     echo echo.
-    echo echo  Carpeta del proyecto: %%~dp0
-    echo echo  Node.js: %%NODE_BIN%%\node.exe
-    echo echo.
     echo.
-    echo :: Verificar que node.exe existe
     echo if not exist "%%NODE_BIN%%\node.exe" ^(
-    echo     echo  [ERROR] Node.js no encontrado en %%NODE_BIN%%
-    echo     echo  Ejecuta primero instalar_node.bat
-    echo     pause
-    echo     exit /b 1
+    echo     echo  [ERROR] Node.js no encontrado. Ejecuta instalar_node.bat primero.
+    echo     pause ^& exit /b 1
     echo ^)
     echo.
-    echo :: Verificar que package.json existe en esta carpeta
     echo if not exist "%%~dp0package.json" ^(
     echo     echo  [ERROR] No se encontro package.json en %%~dp0
-    echo     echo  Asegurate de que server.js y package.json esten junto a este .bat
-    echo     pause
-    echo     exit /b 1
+    echo     pause ^& exit /b 1
     echo ^)
     echo.
-    echo :: Instalar dependencias si no existen o si falta alguna
+    echo :: Instalar dependencias si faltan
     echo if not exist "%%~dp0node_modules\express" ^(
-    echo     echo  Instalando dependencias NPM, espera...
-    echo     "%%NODE_BIN%%\npm.cmd" install
+    echo     echo  Instalando dependencias NPM ^(koffi, express, better-sqlite3, node-zklib^)...
+    echo     echo  Esto puede tardar 1-2 minutos...
+    echo     echo.
+    echo     :: Limpiar node_modules roto si existe
+    echo     if exist "%%~dp0node_modules" rmdir /S /Q "%%~dp0node_modules"
+    echo     "%%NODE_BIN%%\npm.cmd" install --prefer-offline
     echo     if errorlevel 1 ^(
-    echo         echo  [ERROR] npm install fallo. Revisa tu conexion a internet.
-    echo         pause
-    echo         exit /b 1
+    echo         echo.
+    echo         echo  [ERROR] npm install fallo.
+    echo         echo  Intenta de nuevo o revisa tu conexion a internet.
+    echo         pause ^& exit /b 1
     echo     ^)
     echo     echo.
     echo ^)
     echo.
-    echo echo  Servidor corriendo en: http://localhost:3000
+    echo echo  Servidor: http://localhost:3000
     echo echo  Presiona Ctrl+C para detener.
     echo echo.
-    echo.
     echo "%%NODE_BIN%%\node.exe" "%%~dp0server.js"
-    echo.
     echo pause
 )
 
@@ -161,15 +141,14 @@ echo  ===============================================
 echo   LISTO
 echo  ===============================================
 echo.
-echo   Archivos esperados junto a este .bat:
-echo     server.js
-echo     slk20r.js
-echo     package.json
-echo     public\index.html
+echo   NOTA: koffi ^(para SLK20R^) NO necesita Python ni
+echo   Visual Studio. Se instala solo con npm install.
 echo.
-echo   Para iniciar ZKControl:
-echo   ^> iniciar.bat
+echo   Para usar el SLK20R instala ademas:
+echo   ZKFinger SDK desde zkteco.com/support
+echo   ^(copia libzkfplib.dll a Windows\System32^)
 echo.
+echo   Para iniciar: iniciar.bat
 echo  ===============================================
 echo.
 pause
