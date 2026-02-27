@@ -2,13 +2,14 @@
 setlocal enabledelayedexpansion
 title ZKTeco - Instalador de Node.js Portable
 
-:: ─── Configuracion ────────────────────────────────────────────────────────────
 set NODE_VERSION=20.11.1
 set NODE_ARCH=x64
 set NODE_ZIP=node-v%NODE_VERSION%-win-%NODE_ARCH%.zip
 set NODE_URL=https://nodejs.org/dist/v%NODE_VERSION%/%NODE_ZIP%
 set INSTALL_DIR=%~dp0runtime\node
-set PATH_BAT=%~dp0iniciar.bat
+set RUNTIME_DIR=%~dp0runtime
+set PS1_DOWNLOAD=%~dp0runtime\_download.ps1
+set PS1_EXTRACT=%~dp0runtime\_extract.ps1
 
 echo.
 echo  ===============================================
@@ -16,59 +17,63 @@ echo   ZKControl - Instalador Node.js Portable
 echo  ===============================================
 echo.
 
-:: ─── Verificar si ya esta instalado ───────────────────────────────────────────
+:: ─── Ya instalado? ────────────────────────────────────────────────────────────
 if exist "%INSTALL_DIR%\node.exe" (
-    echo  [OK] Node.js ya esta instalado en:
-    echo       %INSTALL_DIR%
-    echo.
+    echo  [OK] Node.js ya esta instalado.
     "%INSTALL_DIR%\node.exe" --version
     echo.
     goto :generar_iniciar
 )
 
-:: ─── Crear carpeta runtime ────────────────────────────────────────────────────
+:: ─── Crear carpetas ───────────────────────────────────────────────────────────
 echo  [1/4] Creando carpeta runtime...
-if not exist "%~dp0runtime" mkdir "%~dp0runtime"
+if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%"
 if not exist "%INSTALL_DIR%"  mkdir "%INSTALL_DIR%"
 
-:: ─── Descargar Node.js con PowerShell ────────────────────────────────────────
+:: ─── Escribir script de descarga ─────────────────────────────────────────────
 echo  [2/4] Descargando Node.js v%NODE_VERSION% (%NODE_ARCH%)...
-echo        Fuente: %NODE_URL%
+echo        %NODE_URL%
 echo.
 
-powershell -NoProfile -Command ^
-  "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; ^
-   $ProgressPreference = 'SilentlyContinue'; ^
-   Invoke-WebRequest -Uri '%NODE_URL%' -OutFile '%~dp0runtime\%NODE_ZIP%'"
+echo [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 > "%PS1_DOWNLOAD%"
+echo $ProgressPreference = 'SilentlyContinue' >> "%PS1_DOWNLOAD%"
+echo $url  = '%NODE_URL%' >> "%PS1_DOWNLOAD%"
+echo $dest = '%RUNTIME_DIR%\%NODE_ZIP%' >> "%PS1_DOWNLOAD%"
+echo Invoke-WebRequest -Uri $url -OutFile $dest >> "%PS1_DOWNLOAD%"
 
-if not exist "%~dp0runtime\%NODE_ZIP%" (
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1_DOWNLOAD%"
+del "%PS1_DOWNLOAD%" >nul 2>&1
+
+if not exist "%RUNTIME_DIR%\%NODE_ZIP%" (
     echo.
     echo  [ERROR] No se pudo descargar Node.js.
     echo          Verifica tu conexion a internet e intenta de nuevo.
+    echo.
     pause
     exit /b 1
 )
-
 echo  [OK] Descarga completada.
 echo.
 
-:: ─── Extraer ZIP ──────────────────────────────────────────────────────────────
+:: ─── Escribir script de extraccion ───────────────────────────────────────────
 echo  [3/4] Extrayendo archivos...
 
-powershell -NoProfile -Command ^
-  "$ProgressPreference = 'SilentlyContinue'; ^
-   Expand-Archive -Path '%~dp0runtime\%NODE_ZIP%' -DestinationPath '%~dp0runtime\' -Force"
+echo $ProgressPreference = 'SilentlyContinue' > "%PS1_EXTRACT%"
+echo $zip  = '%RUNTIME_DIR%\%NODE_ZIP%' >> "%PS1_EXTRACT%"
+echo $dest = '%RUNTIME_DIR%' >> "%PS1_EXTRACT%"
+echo Expand-Archive -Path $zip -DestinationPath $dest -Force >> "%PS1_EXTRACT%"
 
-:: Mover contenido de la subcarpeta al destino final
-set NODE_EXTRACTED=%~dp0runtime\node-v%NODE_VERSION%-win-%NODE_ARCH%
+powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1_EXTRACT%"
+del "%PS1_EXTRACT%" >nul 2>&1
 
+:: Mover contenido a INSTALL_DIR
+set NODE_EXTRACTED=%RUNTIME_DIR%\node-v%NODE_VERSION%-win-%NODE_ARCH%
 if exist "%NODE_EXTRACTED%" (
     xcopy "%NODE_EXTRACTED%\*" "%INSTALL_DIR%\" /E /I /Q /Y >nul
     rmdir /S /Q "%NODE_EXTRACTED%"
 )
 
-:: Limpiar ZIP
-del "%~dp0runtime\%NODE_ZIP%" >nul 2>&1
+del "%RUNTIME_DIR%\%NODE_ZIP%" >nul 2>&1
 
 if not exist "%INSTALL_DIR%\node.exe" (
     echo.
@@ -76,16 +81,15 @@ if not exist "%INSTALL_DIR%\node.exe" (
     pause
     exit /b 1
 )
-
-echo  [OK] Node.js extraido correctamente.
+echo  [OK] Archivos extraidos.
 echo.
 
-:: ─── Verificar instalacion ────────────────────────────────────────────────────
+:: ─── Verificar ────────────────────────────────────────────────────────────────
 echo  [4/4] Verificando instalacion...
 "%INSTALL_DIR%\node.exe" --version
 "%INSTALL_DIR%\npm.cmd" --version
-echo.
 echo  [OK] Node.js y npm listos.
+echo.
 
 :: ─── Generar iniciar.bat ──────────────────────────────────────────────────────
 :generar_iniciar
@@ -96,11 +100,10 @@ echo  Generando iniciar.bat...
     echo title ZKControl Server
     echo setlocal
     echo.
-    echo set NODE_PATH=%INSTALL_DIR%
-    echo set PATH=%%NODE_PATH%%;%%PATH%%
-    echo set PROJECT_DIR=%%~dp0
+    echo set "NODE_BIN=%INSTALL_DIR%"
+    echo set "PATH=%%NODE_BIN%%;%%PATH%%"
     echo.
-    echo cd /d "%%PROJECT_DIR%%"
+    echo cd /d "%%~dp0"
     echo.
     echo echo.
     echo echo  ===============================================
@@ -108,31 +111,28 @@ echo  Generando iniciar.bat...
     echo echo  ===============================================
     echo echo.
     echo.
-    echo :: Instalar dependencias si no existen
-    echo if not exist "%%PROJECT_DIR%%node_modules" (
-    echo     echo  Instalando dependencias NPM...
-    echo     "%%NODE_PATH%%\npm.cmd" install
+    echo if not exist "%%~dp0node_modules" (
+    echo     echo  Instalando dependencias NPM, espera...
+    echo     "%%NODE_BIN%%\npm.cmd" install
     echo     echo.
     echo ^)
     echo.
-    echo echo  Servidor corriendo en http://localhost:3000
+    echo echo  Abre tu navegador en: http://localhost:3000
     echo echo  Presiona Ctrl+C para detener.
     echo echo.
-    echo.
-    echo "%%NODE_PATH%%\node.exe" server.js
-    echo.
+    echo "%%NODE_BIN%%\node.exe" server.js
     echo pause
-) > "%PATH_BAT%"
+) > "%~dp0iniciar.bat"
 
 echo.
 echo  ===============================================
-echo   INSTALACION COMPLETADA
+echo   LISTO
 echo  ===============================================
 echo.
 echo   Node.js instalado en: %INSTALL_DIR%
 echo.
-echo   Para iniciar ZKControl:
-echo   ^> Ejecuta  iniciar.bat
+echo   Para iniciar ZKControl ejecuta:
+echo   ^> iniciar.bat
 echo.
 echo  ===============================================
 echo.
