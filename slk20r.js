@@ -1,105 +1,104 @@
 /**
- * slk20r.js - Captura de huellas SLK20R via ZKFinger SDK
- *
- * Usa koffi (binarios precompilados, sin Python ni node-gyp).
+ * slk20r.js - Captura de huellas SLK20R via ZKFinger SDK (koffi)
  *
  * REQUISITOS:
- *   1. Instalar ZKFinger SDK desde https://www.zkteco.com/support
- *      El instalador copia libzkfplib.dll en C:\Windows\System32\
- *   2. npm install  (koffi ya está en package.json)
- *
- * Si el SDK no está instalado, el módulo queda en modo placeholder
- * y el servidor sigue funcionando con advertencia.
+ *   - ZKFinger SDK instalado (copia DLL a Windows\System32)
+ *   - npm install  (koffi está en package.json)
  */
 
 let koffi;
 let lib;
 let sdkOk = false;
 
-// Nombres posibles del DLL según versión del SDK instalado
-const DLL_CANDIDATES = [
-  'libzkfplib',    // ZKFinger SDK v5.x (más común)
-  'zkfinger10',    // ZKFinger SDK v4.x
-];
+const IMG_SIZE = 500 * 500;
+const FP_SIZE  = 2048;
 
-const IMG_SIZE = 500 * 500;  // buffer imagen BMP
-const FP_SIZE  = 2048;       // buffer template biométrico
+// Todos los nombres conocidos del DLL según versión del SDK
+// Probamos nombre solo Y con ruta absoluta a System32
+const SYS32 = 'C:\\Windows\\System32\\';
+const SYS32_86 = 'C:\\Windows\\SysWOW64\\';
+
+const DLL_CANDIDATES = [
+  // Con ruta completa (más confiable)
+  SYS32    + 'libzkfplib.dll',
+  SYS32    + 'zkfinger10.dll',
+  SYS32    + 'libzkfp.dll',
+  SYS32    + 'ZKFPLib.dll',
+  SYS32    + 'zkfplib.dll',
+  SYS32    + 'libzkfpcsharp.dll',
+  SYS32_86 + 'libzkfplib.dll',
+  SYS32_86 + 'zkfinger10.dll',
+  SYS32_86 + 'libzkfp.dll',
+  SYS32_86 + 'ZKFPLib.dll',
+  SYS32_86 + 'zkfplib.dll',
+  // Sin ruta (busca en PATH)
+  'libzkfplib',
+  'zkfinger10',
+  'libzkfp',
+  'ZKFPLib',
+  'zkfplib',
+];
 
 try {
   koffi = require('koffi');
 
+  console.log('[SLK20R] Buscando DLL del ZKFinger SDK...');
+
   for (const dll of DLL_CANDIDATES) {
     try {
-      lib = koffi.load(`${dll}.dll`);
+      const candidate = koffi.load(dll);
 
-      // Declarar las funciones del SDK
-      lib.func('ZKFPM_Init',               'int',     []);
-      lib.func('ZKFPM_Terminate',          'int',     []);
-      lib.func('ZKFPM_OpenDevice',         'void*',   ['int']);
-      lib.func('ZKFPM_CloseDevice',        'int',     ['void*']);
-      lib.func('ZKFPM_AcquireFingerprint', 'int',     ['void*', 'uint8*', 'uint32*', 'uint8*', 'uint32*']);
-      lib.func('ZKFPM_DBMerge',            'int',     ['void*', 'uint8*', 'uint32', 'uint8*', 'uint32', 'uint8*', 'uint32', 'uint8*', 'uint32*']);
+      // Verificar que tenga las funciones esperadas
+      candidate.func('ZKFPM_Init',               'int',    []);
+      candidate.func('ZKFPM_Terminate',          'int',    []);
+      candidate.func('ZKFPM_OpenDevice',         'void*',  ['int']);
+      candidate.func('ZKFPM_CloseDevice',        'int',    ['void*']);
+      candidate.func('ZKFPM_AcquireFingerprint', 'int',    ['void*', 'uint8*', 'uint32*', 'uint8*', 'uint32*']);
+      candidate.func('ZKFPM_DBMerge',            'int',    ['void*', 'uint8*', 'uint32', 'uint8*', 'uint32', 'uint8*', 'uint32', 'uint8*', 'uint32*']);
 
+      lib   = candidate;
       sdkOk = true;
-      console.log(`[SLK20R] SDK cargado: ${dll}.dll`);
+      console.log(`[SLK20R] ✓ SDK cargado: ${dll}`);
       break;
-    } catch {
-      // Probar el siguiente candidato
+    } catch (e) {
+      // Mostrar solo errores que no sean "archivo no encontrado" para no saturar el log
+      const msg = e.message || '';
+      if (!msg.includes('find') && !msg.includes('open') && !msg.includes('No such') && !msg.includes('cannot') && !msg.includes('The specified module')) {
+        console.log(`[SLK20R]   ${dll.split('\\').pop()} → ${msg}`);
+      }
     }
   }
 
   if (!sdkOk) {
-    console.warn('[SLK20R] DLL no encontrado. Instala ZKFinger SDK desde zkteco.com/support');
+    console.warn('[SLK20R] ✗ DLL no encontrado en ninguna ubicación conocida.');
+    console.warn('[SLK20R]   Verifica cuál DLL instaló el SDK ejecutando en CMD:');
+    console.warn('[SLK20R]   dir C:\\Windows\\System32\\*zk*.dll');
+    console.warn('[SLK20R]   dir C:\\Windows\\System32\\*fp*.dll');
   }
-} catch {
-  console.warn('[SLK20R] koffi no disponible — ejecuta npm install');
+} catch (e) {
+  console.warn('[SLK20R] koffi no disponible:', e.message);
 }
 
 // ─── API pública ──────────────────────────────────────────────────────────────
 
-function disponible() {
-  return sdkOk;
-}
+function disponible() { return sdkOk; }
 
-/**
- * Inicializa el SDK y abre el primer lector USB.
- * @returns {{ ok: boolean, handle: object|null, error?: string }}
- */
 function inicializar() {
   if (!sdkOk) return { ok: false, error: 'SDK no disponible' };
-
   try {
     const count = lib.ZKFPM_Init();
-    if (count <= 0) {
-      return { ok: false, error: `No se encontró ningún lector USB (código ${count})` };
-    }
-
+    if (count <= 0) return { ok: false, error: `Sin dispositivos USB (código ${count})` };
     const handle = lib.ZKFPM_OpenDevice(0);
-    if (!handle) {
-      lib.ZKFPM_Terminate();
-      return { ok: false, error: 'No se pudo abrir el SLK20R' };
-    }
-
+    if (!handle) { lib.ZKFPM_Terminate(); return { ok: false, error: 'No se pudo abrir el SLK20R' }; }
     return { ok: true, handle };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 }
 
-/**
- * Captura N lecturas y retorna el template fusionado.
- * Bloqueante: espera a que el usuario coloque el dedo.
- *
- * @param {object} handle
- * @param {number} lecturas  - cuántas capturas hacer (default 3)
- * @param {number} timeoutMs - tiempo máximo por lectura en ms (default 15000)
- * @returns {{ ok: boolean, template: Buffer|null, error?: string }}
- */
 async function capturarHuella(handle, lecturas = 3, timeoutMs = 15000) {
   if (!sdkOk) return { ok: false, error: 'SDK no disponible' };
-
   const templates = [];
-
   for (let i = 0; i < lecturas; i++) {
     console.log(`[SLK20R] Esperando lectura ${i + 1}/${lecturas}...`);
     const r = await esperarLectura(handle, timeoutMs);
@@ -107,39 +106,28 @@ async function capturarHuella(handle, lecturas = 3, timeoutMs = 15000) {
     templates.push(r.template);
     console.log(`[SLK20R] Lectura ${i + 1} OK (${r.template.length} bytes)`);
   }
-
-  // Con 3 templates intentar fusión
   if (templates.length >= 3) {
     const fusion = fusionar(handle, templates[0], templates[1], templates[2]);
     if (fusion.ok) return fusion;
-    console.warn(`[SLK20R] DBMerge falló (${fusion.error}), usando primera lectura`);
+    console.warn(`[SLK20R] DBMerge falló: ${fusion.error} — usando primera lectura`);
   }
-
   return { ok: true, template: templates[0] };
 }
 
-/**
- * Espera activamente una lectura exitosa del dedo.
- */
 function esperarLectura(handle, timeoutMs) {
   return new Promise((resolve) => {
     const inicio = Date.now();
-
     const poll = () => {
       try {
         const imgBuf     = Buffer.alloc(IMG_SIZE);
-        const imgSizeBuf = [IMG_SIZE];          // koffi pasa uint32* como array de 1 elemento
+        const imgSizeBuf = [IMG_SIZE];
         const fpBuf      = Buffer.alloc(FP_SIZE);
         const fpSizeBuf  = [FP_SIZE];
-
         const ret = lib.ZKFPM_AcquireFingerprint(handle, imgBuf, imgSizeBuf, fpBuf, fpSizeBuf);
-
         if (ret === 0) {
-          // Lectura exitosa
-          const size = fpSizeBuf[0];
-          resolve({ ok: true, template: Buffer.from(fpBuf.slice(0, size)) });
+          resolve({ ok: true, template: Buffer.from(fpBuf.slice(0, fpSizeBuf[0])) });
         } else if (Date.now() - inicio >= timeoutMs) {
-          resolve({ ok: false, error: `Timeout esperando dedo en SLK20R (${timeoutMs}ms)` });
+          resolve({ ok: false, error: `Timeout ${timeoutMs}ms esperando dedo` });
         } else {
           setTimeout(poll, 200);
         }
@@ -147,40 +135,22 @@ function esperarLectura(handle, timeoutMs) {
         resolve({ ok: false, error: err.message });
       }
     };
-
     poll();
   });
 }
 
-/**
- * Fusiona 3 templates en uno con ZKFPM_DBMerge.
- */
 function fusionar(handle, t1, t2, t3) {
   try {
     const regBuf     = Buffer.alloc(FP_SIZE);
     const regSizeBuf = [FP_SIZE];
-
-    const ret = lib.ZKFPM_DBMerge(
-      handle,
-      t1, t1.length,
-      t2, t2.length,
-      t3, t3.length,
-      regBuf, regSizeBuf
-    );
-
-    if (ret === 0) {
-      const size = regSizeBuf[0];
-      return { ok: true, template: Buffer.from(regBuf.slice(0, size)) };
-    }
-    return { ok: false, error: `DBMerge retornó ${ret}` };
+    const ret = lib.ZKFPM_DBMerge(handle, t1, t1.length, t2, t2.length, t3, t3.length, regBuf, regSizeBuf);
+    if (ret === 0) return { ok: true, template: Buffer.from(regBuf.slice(0, regSizeBuf[0])) };
+    return { ok: false, error: `DBMerge código ${ret}` };
   } catch (err) {
     return { ok: false, error: err.message };
   }
 }
 
-/**
- * Cierra el dispositivo y libera el SDK.
- */
 function cerrar(handle) {
   if (!sdkOk || !handle) return;
   try { lib.ZKFPM_CloseDevice(handle); } catch {}
