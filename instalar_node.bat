@@ -19,20 +19,17 @@ echo   ZKControl - Instalador Node.js Portable
 echo  ===============================================
 echo.
 
-:: ─── Ya instalado? ────────────────────────────────────────────────────────────
 if exist "%INSTALL_DIR%\node.exe" (
-    echo  [OK] Node.js ya esta instalado.
+    echo  [OK] Node.js ya esta instalado:
     "%INSTALL_DIR%\node.exe" --version
     echo.
-    goto :generar_iniciar
+    goto :fin
 )
 
-:: ─── Crear carpetas ───────────────────────────────────────────────────────────
-echo  [1/4] Creando carpeta runtime...
+echo  [1/4] Creando carpetas...
 if not exist "%RUNTIME_DIR%" mkdir "%RUNTIME_DIR%"
 if not exist "%INSTALL_DIR%"  mkdir "%INSTALL_DIR%"
 
-:: ─── Descargar ────────────────────────────────────────────────────────────────
 echo  [2/4] Descargando Node.js v%NODE_VERSION%...
 echo        %NODE_URL%
 echo.
@@ -47,14 +44,13 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%PS1_DOWNLOAD%"
 del "%PS1_DOWNLOAD%" >nul 2>&1
 
 if not exist "%RUNTIME_DIR%\%NODE_ZIP%" (
-    echo  [ERROR] No se pudo descargar Node.js.
+    echo  [ERROR] No se pudo descargar. Verifica tu internet.
     pause & exit /b 1
 )
 echo  [OK] Descarga completada.
 echo.
 
-:: ─── Extraer ──────────────────────────────────────────────────────────────────
-echo  [3/4] Extrayendo archivos...
+echo  [3/4] Extrayendo...
 
 echo $ProgressPreference = 'SilentlyContinue' > "%PS1_EXTRACT%"
 echo $zip  = '%RUNTIME_DIR%\%NODE_ZIP%' >> "%PS1_EXTRACT%"
@@ -72,83 +68,18 @@ if exist "%NODE_EXTRACTED%" (
 del "%RUNTIME_DIR%\%NODE_ZIP%" >nul 2>&1
 
 if not exist "%INSTALL_DIR%\node.exe" (
-    echo  [ERROR] La extraccion fallo.
+    echo  [ERROR] Extraccion fallida.
     pause & exit /b 1
 )
 
-echo  [4/4] Verificando instalacion...
+echo  [4/4] Verificando...
 "%INSTALL_DIR%\node.exe" --version
 "%INSTALL_DIR%\npm.cmd"  --version
-echo  [OK] Node.js listo.
-echo.
 
-:: ─── Generar iniciar.bat ──────────────────────────────────────────────────────
-:generar_iniciar
-echo  Generando iniciar.bat...
-
-> "%BAT_DIR%iniciar.bat" (
-    echo @echo off
-    echo setlocal
-    echo title ZKControl Server
-    echo.
-    echo set "NODE_BIN=%%~dp0runtime\node"
-    echo set "PATH=%%NODE_BIN%%;%%PATH%%"
-    echo cd /d "%%~dp0"
-    echo.
-    echo echo.
-    echo echo  ===============================================
-    echo echo   ZKControl - Iniciando servidor...
-    echo echo  ===============================================
-    echo echo.
-    echo.
-    echo if not exist "%%NODE_BIN%%\node.exe" ^(
-    echo     echo  [ERROR] Node.js no encontrado. Ejecuta instalar_node.bat primero.
-    echo     pause ^& exit /b 1
-    echo ^)
-    echo.
-    echo if not exist "%%~dp0package.json" ^(
-    echo     echo  [ERROR] No se encontro package.json en %%~dp0
-    echo     pause ^& exit /b 1
-    echo ^)
-    echo.
-    echo :: Instalar dependencias si faltan
-    echo if not exist "%%~dp0node_modules\express" ^(
-    echo     echo  Instalando dependencias NPM ^(koffi, express, better-sqlite3, node-zklib^)...
-    echo     echo  Esto puede tardar 1-2 minutos...
-    echo     echo.
-    echo     :: Limpiar node_modules roto si existe
-    echo     if exist "%%~dp0node_modules" rmdir /S /Q "%%~dp0node_modules"
-    echo     "%%NODE_BIN%%\npm.cmd" install --prefer-offline
-    echo     if errorlevel 1 ^(
-    echo         echo.
-    echo         echo  [ERROR] npm install fallo.
-    echo         echo  Intenta de nuevo o revisa tu conexion a internet.
-    echo         pause ^& exit /b 1
-    echo     ^)
-    echo     echo.
-    echo ^)
-    echo.
-    echo echo  Servidor: http://localhost:3000
-    echo echo  Presiona Ctrl+C para detener.
-    echo echo.
-    echo "%%NODE_BIN%%\node.exe" "%%~dp0server.js"
-    echo pause
-)
-
-echo  [OK] iniciar.bat generado.
+:fin
 echo.
 echo  ===============================================
-echo   LISTO
-echo  ===============================================
-echo.
-echo   NOTA: koffi ^(para SLK20R^) NO necesita Python ni
-echo   Visual Studio. Se instala solo con npm install.
-echo.
-echo   Para usar el SLK20R instala ademas:
-echo   ZKFinger SDK desde zkteco.com/support
-echo   ^(copia libzkfplib.dll a Windows\System32^)
-echo.
-echo   Para iniciar: iniciar.bat
+echo   Node.js listo. Ejecuta: iniciar.bat
 echo  ===============================================
 echo.
 pause
