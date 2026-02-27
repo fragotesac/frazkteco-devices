@@ -96,13 +96,31 @@ function log(msg) {
 }
 
 // ─── Secuencia de UID para MA300 ─────────────────────────────────────────────
-// El MA300 requiere uid entero 1-65535. Nunca usar DNI directo como uid.
 function siguienteUID() {
   const row = db.prepare('SELECT valor FROM secuencia_uid WHERE id = 1').get();
   const uid = row.valor;
   db.prepare('UPDATE secuencia_uid SET valor = ? WHERE id = 1').run(uid + 1);
   return uid;
 }
+
+// ─── Migraciones: BD existente sin columnas nuevas ────────────────────────────
+;(function migrar() {
+  const cols = db.prepare('PRAGMA table_info(usuarios)').all().map(c => c.name);
+  if (!cols.includes('uid')) {
+    db.exec('ALTER TABLE usuarios ADD COLUMN uid INTEGER');
+    log('Migracion: columna uid añadida');
+  }
+  if (!cols.includes('apellido')) {
+    db.exec("ALTER TABLE usuarios ADD COLUMN apellido TEXT DEFAULT ''");
+    log('Migracion: columna apellido añadida');
+  }
+  const sinUid = db.prepare('SELECT id FROM usuarios WHERE uid IS NULL').all();
+  if (sinUid.length > 0) {
+    const setUid = db.prepare('UPDATE usuarios SET uid = ? WHERE id = ?');
+    for (const u of sinUid) setUid.run(siguienteUID(), u.id);
+    log(`Migracion: uid asignado a ${sinUid.length} usuarios existentes`);
+  }
+})();
 
 // ─── ZK: una conexión, una operación, cierre seguro ──────────────────────────
 async function zkEjecutar(operacion, timeoutMs = 20000) {
