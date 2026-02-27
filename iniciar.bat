@@ -11,33 +11,30 @@ set "SERVER=%BAT_DIR%server.js"
 set "PKG=%BAT_DIR%package.json"
 set "MODS=%BAT_DIR%node_modules"
 
+:: CRÍTICO: agregar node al PATH para que los scripts de postinstall lo encuentren
+set "PATH=%NODE_BIN%;%PATH%"
+
 echo.
 echo  ===============================================
 echo   ZKControl - Iniciando servidor...
 echo  ===============================================
 echo.
 
-:: ─── Verificaciones previas ───────────────────────────────────────────────────
+:: ─── Verificaciones ───────────────────────────────────────────────────────────
 if not exist "%NODE_EXE%" (
-    echo  [ERROR] Node.js no encontrado en:
-    echo          %NODE_BIN%
-    echo.
+    echo  [ERROR] Node.js no encontrado en: %NODE_BIN%
     echo  Ejecuta primero: instalar_node.bat
     echo.
     pause & exit /b 1
 )
 
 if not exist "%SERVER%" (
-    echo  [ERROR] No se encontro server.js en:
-    echo          %BAT_DIR%
-    echo.
+    echo  [ERROR] No se encontro server.js en: %BAT_DIR%
     pause & exit /b 1
 )
 
 if not exist "%PKG%" (
-    echo  [ERROR] No se encontro package.json en:
-    echo          %BAT_DIR%
-    echo.
+    echo  [ERROR] No se encontro package.json en: %BAT_DIR%
     pause & exit /b 1
 )
 
@@ -49,26 +46,20 @@ echo.
 if not exist "%MODS%\express" (
     echo  [NPM] Instalando dependencias...
     echo        express, better-sqlite3, koffi, node-zklib
-    echo        Esto puede tardar 2-3 minutos la primera vez.
+    echo        Espera 2-3 minutos...
     echo.
 
-    :: Limpiar node_modules parcial si existe
     if exist "%MODS%" (
-        echo  [NPM] Limpiando instalacion anterior incompleta...
+        echo  Limpiando instalacion anterior incompleta...
         rmdir /S /Q "%MODS%"
     )
 
-    :: Cambiar a la carpeta del proyecto y ejecutar npm install
     cd /d "%BAT_DIR%"
     "%NPM_CMD%" install
 
     if errorlevel 1 (
         echo.
-        echo  [ERROR] npm install fallo.
-        echo.
-        echo  Posibles causas:
-        echo    - Sin internet
-        echo    - Antivirus bloqueando npm
+        echo  [ERROR] npm install fallo. Revisa el log de arriba.
         echo.
         pause & exit /b 1
     )
