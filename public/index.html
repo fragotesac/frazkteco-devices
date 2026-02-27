@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ZKTeco Control Panel</title>
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow:wght@300;400;600;700&family=Barlow+Condensed:wght@700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0c0f;
+    --surface: #111318;
+    --surface2: #181c23;
+    --border: #1e2530;
+    --accent: #00e5a0;
+    --accent2: #0066ff;
+    --danger: #ff3b5c;
+    --warn: #ffb800;
+    --text: #e8edf5;
+    --muted: #4a5568;
+    --mono: 'Share Tech Mono', monospace;
+    --sans: 'Barlow', sans-serif;
+    --display: 'Barlow Condensed', sans-serif;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); min-height: 100vh; overflow-x: hidden; }
+  body::before { content: ''; position: fixed; inset: 0; background: repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,229,160,0.015) 2px, rgba(0,229,160,0.015) 4px); pointer-events: none; z-index: 1000; }
+
+  .header { display: flex; align-items: center; justify-content: space-between; padding: 16px 32px; border-bottom: 1px solid var(--border); background: var(--surface); position: sticky; top: 0; z-index: 100; }
+  .logo { display: flex; align-items: center; gap: 12px; }
+  .logo-icon { width: 36px; height: 36px; background: var(--accent); border-radius: 6px; display: grid; place-items: center; }
+  .logo-text { font-family: var(--display); font-size: 22px; font-weight: 900; letter-spacing: 2px; text-transform: uppercase; }
+  .logo-text span { color: var(--accent); }
+
+  .api-status { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 12px; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); transition: all 0.3s; }
+  .api-status.online { color: var(--accent); border-color: rgba(0,229,160,0.3); }
+  .api-status.offline { color: var(--danger); border-color: rgba(255,59,92,0.3); }
+  .api-status.checking { color: var(--warn); border-color: rgba(255,184,0,0.3); }
+  .pulse { width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
+
+  .layout { display: grid; grid-template-columns: 220px 1fr; min-height: calc(100vh - 65px); }
+  .sidebar { background: var(--surface); border-right: 1px solid var(--border); padding: 24px 0; }
+  .nav-label { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; padding: 8px 20px 4px; }
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 20px; cursor: pointer; font-size: 14px; color: var(--muted); transition: all 0.15s; border-left: 2px solid transparent; }
+  .nav-item:hover { color: var(--text); background: var(--surface2); }
+  .nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(0,229,160,0.05); }
+
+  .main { padding: 32px; overflow-y: auto; }
+  .page { display: none; animation: fadeIn 0.2s ease; }
+  .page.active { display: block; }
+  @keyframes fadeIn { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:translateY(0); } }
+
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 24px; }
+  .section-title { font-family: var(--display); font-size: 28px; font-weight: 900; letter-spacing: 1px; text-transform: uppercase; }
+  .section-title span { display: block; font-family: var(--mono); font-size: 11px; font-weight: 400; color: var(--muted); letter-spacing: 2px; margin-bottom: 2px; }
+
+  .stats-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 16px; margin-bottom: 32px; }
+  .stat-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 20px; position: relative; overflow: hidden; }
+  .stat-card::before { content:''; position:absolute; top:0; left:0; right:0; height:2px; }
+  .stat-card.green::before { background: var(--accent); }
+  .stat-card.blue::before { background: var(--accent2); }
+  .stat-card.red::before { background: var(--danger); }
+  .stat-card.yellow::before { background: var(--warn); }
+  .stat-label { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+  .stat-value { font-family: var(--display); font-size: 42px; font-weight: 900; line-height: 1; }
+  .stat-card.green .stat-value { color: var(--accent); }
+  .stat-card.blue .stat-value { color: var(--accent2); }
+  .stat-card.red .stat-value { color: var(--danger); }
+  .stat-card.yellow .stat-value { color: var(--warn); }
+  .stat-sub { font-size: 12px; color: var(--muted); margin-top: 6px; }
+
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; margin-bottom: 20px; }
+  .card-header { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+  .card-title { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 1px; text-transform: uppercase; }
+  .card-body { padding: 20px; }
+
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { font-family: var(--mono); font-size: 10px; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; text-align: left; padding: 10px 16px; border-bottom: 1px solid var(--border); }
+  td { padding: 12px 16px; border-bottom: 1px solid rgba(30,37,48,0.5); color: var(--text); }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 4px; font-family: var(--mono); font-size: 11px; font-weight: 600; }
+  .badge::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
+  .badge-green { background: rgba(0,229,160,0.1); color: var(--accent); }
+  .badge-red { background: rgba(255,59,92,0.1); color: var(--danger); }
+  .badge-blue { background: rgba(0,102,255,0.1); color: var(--accent2); }
+  .badge-yellow { background: rgba(255,184,0,0.1); color: var(--warn); }
+
+  .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .form-group { display: flex; flex-direction: column; gap: 6px; }
+  .form-group.full { grid-column: 1/-1; }
+  label { font-family: var(--mono); font-size: 11px; color: var(--muted); letter-spacing: 1px; text-transform: uppercase; }
+  input, select { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 10px 14px; color: var(--text); font-family: var(--sans); font-size: 14px; outline: none; transition: border-color 0.15s; width: 100%; }
+  input:focus, select:focus { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(0,229,160,0.1); }
+  input::placeholder { color: var(--muted); }
+  select option { background: var(--surface); }
+
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border-radius: 6px; font-family: var(--sans); font-size: 13px; font-weight: 600; cursor: pointer; border: none; transition: all 0.15s; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: #000; }
+  .btn-primary:hover:not(:disabled) { background: #00c988; }
+  .btn-outline { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn-outline:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .btn-danger { background: transparent; border: 1px solid var(--danger); color: var(--danger); }
+  .btn-danger:hover:not(:disabled) { background: rgba(255,59,92,0.1); }
+
+  .scanner-container { display: flex; flex-direction: column; align-items: center; padding: 32px; gap: 24px; }
+  .scanner-ring { width: 160px; height: 160px; border-radius: 50%; border: 2px solid var(--border); display: grid; place-items: center; transition: all 0.3s; }
+  .scanner-ring.active { border-color: var(--accent); box-shadow: 0 0 30px rgba(0,229,160,0.2); animation: scanPulse 1.5s infinite; }
+  .scanner-ring.success { border-color: var(--accent); box-shadow: 0 0 40px rgba(0,229,160,0.4); }
+  .scanner-ring.error { border-color: var(--danger); box-shadow: 0 0 30px rgba(255,59,92,0.2); }
+  @keyframes scanPulse { 0%,100% { box-shadow: 0 0 20px rgba(0,229,160,0.2); } 50% { box-shadow: 0 0 40px rgba(0,229,160,0.5); } }
+  .scanner-inner { width: 120px; height: 120px; border-radius: 50%; background: var(--surface2); display: grid; place-items: center; font-size: 48px; }
+  .scanner-status { font-family: var(--mono); font-size: 13px; color: var(--muted); text-align: center; }
+  .scanner-status.active { color: var(--accent); }
+  .scanner-status.success { color: var(--accent); }
+  .scanner-status.error { color: var(--danger); }
+  .progress-bar { width: 200px; height: 4px; background: var(--border); border-radius: 2px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--accent); border-radius: 2px; transition: width 0.5s ease; width: 0%; }
+
+  .live-feed { display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto; }
+  .feed-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--surface2); border-radius: 6px; border-left: 3px solid transparent; animation: slideIn 0.3s ease; }
+  @keyframes slideIn { from { opacity:0; transform:translateX(-10px); } to { opacity:1; transform:translateX(0); } }
+  .feed-item.entrada { border-left-color: var(--accent); }
+  .feed-item.salida { border-left-color: var(--accent2); }
+  .feed-time { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
+  .feed-name { font-weight: 600; font-size: 13px; flex: 1; }
+  .feed-dni { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+
+  .device-card { display: flex; align-items: center; gap: 16px; padding: 16px; background: var(--surface2); border-radius: 8px; border: 1px solid var(--border); }
+  .device-icon { width: 48px; height: 48px; background: rgba(0,229,160,0.1); border-radius: 8px; display: grid; place-items: center; font-size: 24px; flex-shrink: 0; }
+  .device-info { flex: 1; }
+  .device-name { font-weight: 600; font-size: 14px; }
+  .device-meta { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 3px; }
+
+  .loading { display: flex; align-items: center; justify-content: center; padding: 40px; gap: 12px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+  .spinner { width: 20px; height: 20px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .error-state { display: flex; flex-direction: column; align-items: center; padding: 40px; gap: 8px; color: var(--danger); font-family: var(--mono); font-size: 13px; text-align: center; }
+  .empty-state { text-align: center; padding: 40px; color: var(--muted); font-family: var(--mono); font-size: 13px; }
+
+  .toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; }
+  .toast { padding: 12px 18px; border-radius: 8px; font-family: var(--mono); font-size: 12px; max-width: 320px; transition: opacity 0.3s; }
+  .toast.success { background: rgba(0,229,160,0.15); border: 1px solid rgba(0,229,160,0.3); color: var(--accent); }
+  .toast.error { background: rgba(255,59,92,0.15); border: 1px solid rgba(255,59,92,0.3); color: var(--danger); }
+  .toast.info { background: rgba(0,102,255,0.15); border: 1px solid rgba(0,102,255,0.3); color: var(--accent2); }
+
+  .flex { display: flex; }
+  .gap-2 { gap: 8px; }
+  .items-center { align-items: center; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .mt-4 { margin-top: 16px; }
+  .text-muted { color: var(--muted); font-size: 12px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+</style>
+</head>
+<body>
+
+<header class="header">
+  <div class="logo">
+    <div class="logo-icon">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M12 11c0 3-2.3 5.4-5 6.3V21h10v-3.7c-2.7-.9-5-3.3-5-6.3z"/>
+        <path d="M12 11V3"/><circle cx="12" cy="3" r="1"/>
+      </svg>
+    </div>
+    <div class="logo-text">ZK<span>Control</span></div>
+  </div>
+  <div class="api-status checking" id="api-status">
+    <div class="pulse"></div>
+    <span id="api-status-text">Conectando API...</span>
+  </div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar">
+    <div class="nav-section">
+      <div class="nav-label">Principal</div>
+      <div class="nav-item active" onclick="showPage('dashboard',this)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>Dashboard
+      </div>
+      <div class="nav-item" onclick="showPage('marcaciones',this)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>Marcaciones
+      </div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Personal</div>
+      <div class="nav-item" onclick="showPage('usuarios',this)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>Usuarios
+      </div>
+      <div class="nav-item" id="nav-registro" onclick="showPage('registro',this)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Registrar Usuario
+      </div>
+    </div>
+    <div class="nav-section">
+      <div class="nav-label">Sistema</div>
+      <div class="nav-item" onclick="showPage('dispositivo',this)">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Dispositivo
+      </div>
+    </div>
+  </nav>
+
+  <main class="main">
+
+    <!-- DASHBOARD -->
+    <div class="page active" id="page-dashboard">
+      <div class="section-header">
+        <div class="section-title"><span>// Vista general</span>Dashboard</div>
+        <button class="btn btn-outline" onclick="loadDashboard()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>Actualizar
+        </button>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card green"><div class="stat-label">Accesos hoy</div><div class="stat-value" id="stat-accesos">—</div><div class="stat-sub">Marcaciones del día</div></div>
+        <div class="stat-card blue"><div class="stat-label">Usuarios</div><div class="stat-value" id="stat-usuarios">—</div><div class="stat-sub">Registrados en sistema</div></div>
+        <div class="stat-card yellow"><div class="stat-label">Sin validar</div><div class="stat-value" id="stat-sinvalidar">—</div><div class="stat-sub">Sin DNI asociado</div></div>
+        <div class="stat-card red"><div class="stat-label">Total marcaciones</div><div class="stat-value" id="stat-total">—</div><div class="stat-sub">En base de datos</div></div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><div class="card-title">⚡ Feed en vivo</div><span class="badge badge-green">EN VIVO</span></div>
+          <div class="card-body"><div class="live-feed" id="live-feed"><div class="loading"><div class="spinner"></div>Cargando...</div></div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">📊 Últimas 5 marcaciones</div></div>
+          <div class="card-body">
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Nombre</th><th>DNI</th><th>Hora</th><th>Tipo</th></tr></thead>
+                <tbody id="tabla-dashboard"><tr><td colspan="4"><div class="loading"><div class="spinner"></div></div></td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- MARCACIONES -->
+    <div class="page" id="page-marcaciones">
+      <div class="section-header">
+        <div class="section-title"><span>// Historial</span>Marcaciones</div>
+        <button class="btn btn-primary" onclick="exportarCSV()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>Exportar CSV
+        </button>
+      </div>
+      <div class="card">
+        <div class="card-header"><div class="card-title">Filtros</div></div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="form-group"><label>Desde</label><input type="date" id="filtro-desde"></div>
+            <div class="form-group"><label>Hasta</label><input type="date" id="filtro-hasta"></div>
+            <div class="form-group"><label>DNI</label><input type="text" placeholder="Buscar por DNI..." id="filtro-dni"></div>
+            <div class="form-group"><label>Tipo</label><select id="filtro-tipo"><option value="">Todos</option><option value="ENTRADA">Entrada</option><option value="SALIDA">Salida</option></select></div>
+          </div>
+          <div class="mt-4 flex gap-2">
+            <button class="btn btn-primary" onclick="loadMarcaciones()">Buscar</button>
+            <button class="btn btn-outline" onclick="limpiarFiltros()">Limpiar</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Resultados</div>
+          <span class="text-muted" id="count-marcaciones">— registros</span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Nombre</th><th>DNI</th><th>Fecha/Hora</th><th>Tipo</th><th>Dispositivo</th><th>Estado</th></tr></thead>
+            <tbody id="tabla-marcaciones"><tr><td colspan="6"><div class="loading"><div class="spinner"></div>Cargando...</div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- USUARIOS -->
+    <div class="page" id="page-usuarios">
+      <div class="section-header">
+        <div class="section-title"><span>// Base de datos</span>Usuarios</div>
+        <button class="btn btn-primary" onclick="irARegistro()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Nuevo Usuario
+        </button>
+      </div>
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title">Personal registrado</div>
+          <input type="text" placeholder="Buscar..." style="width:200px;padding:6px 12px;" oninput="filtrarTablaUsuarios(this.value)">
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>ID</th><th>Nombre</th><th>DNI</th><th>Badge</th><th>Acciones</th></tr></thead>
+            <tbody id="tabla-usuarios"><tr><td colspan="5"><div class="loading"><div class="spinner"></div>Cargando...</div></td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- REGISTRO -->
+    <div class="page" id="page-registro">
+      <div class="section-header">
+        <div class="section-title"><span>// Nuevo registro</span>Registrar Usuario</div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-header"><div class="card-title">Datos personales</div></div>
+          <div class="card-body">
+            <div class="form-grid">
+              <div class="form-group"><label>Nombre *</label><input type="text" id="reg-nombre" placeholder="Nombres"></div>
+              <div class="form-group"><label>Apellido *</label><input type="text" id="reg-apellido" placeholder="Apellidos"></div>
+              <div class="form-group full">
+                <label>DNI *</label>
+                <input type="text" id="reg-dni" placeholder="Número de documento" maxlength="8"
+                  oninput="document.getElementById('reg-badge').value=this.value">
+              </div>
+              <div class="form-group full">
+                <label>Badge Number</label>
+                <input type="text" id="reg-badge" placeholder="Auto-completado con DNI" readonly style="opacity:0.6">
+              </div>
+            </div>
+            <div class="mt-4 flex gap-2">
+              <button class="btn btn-primary" id="btn-guardar" onclick="guardarUsuario()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>Guardar Usuario
+              </button>
+              <button class="btn btn-outline" onclick="showPage('usuarios',document.querySelector('.nav-item:nth-child(1)'))">Cancelar</button>
+            </div>
+            <div id="reg-msg" style="margin-top:12px;font-family:var(--mono);font-size:12px;display:none"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">📡 Captura de Huella</div>
+            <span class="badge" id="scanner-badge" style="background:rgba(74,85,104,0.2);color:#4a5568">INACTIVO</span>
+          </div>
+          <div class="card-body">
+            <div class="scanner-container">
+              <div class="scanner-ring" id="scanner-ring">
+                <div class="scanner-inner">☝️</div>
+              </div>
+              <div class="scanner-status" id="scanner-status">Guarda el usuario primero, luego captura la huella</div>
+              <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
+              <div class="text-muted" id="scanner-attempts">0 / 3 lecturas</div>
+              <div class="flex gap-2">
+                <button class="btn btn-primary" id="btn-captura" onclick="iniciarCaptura()" disabled>Iniciar captura SLK20R</button>
+                <button class="btn btn-outline" onclick="resetScanner()">Reset</button>
+              </div>
+              <p class="text-muted" style="text-align:center;font-size:11px;max-width:240px;line-height:1.5">
+                Requiere endpoint POST /captura-huella activo en el backend con ZKFinger SDK
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- DISPOSITIVO -->
+    <div class="page" id="page-dispositivo">
+      <div class="section-header">
+        <div class="section-title"><span>// Sistema</span>Dispositivo</div>
+      </div>
+      <div class="grid-2">
+        <div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">MA300 Info</div></div>
+            <div class="card-body">
+              <div class="device-card">
+                <div class="device-icon">🔐</div>
+                <div class="device-info">
+                  <div class="device-name">ZKTeco MA300</div>
+                  <div class="device-meta">192.168.18.251 · Puerto 4370</div>
+                </div>
+                <span class="badge badge-green" id="ma300-badge">ONLINE</span>
+              </div>
+              <div class="mt-4" id="ma300-info"><div class="loading"><div class="spinner"></div>Cargando...</div></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-header"><div class="card-title">SLK20R</div></div>
+            <div class="card-body">
+              <div class="device-card">
+                <div class="device-icon">👆</div>
+                <div class="device-info">
+                  <div class="device-name">ZKTeco SLK20R</div>
+                  <div class="device-meta">USB · Lector biométrico</div>
+                </div>
+                <span class="badge badge-yellow" id="slk-badge">VERIFICANDO</span>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header"><div class="card-title">Acciones</div></div>
+          <div class="card-body" style="display:flex;flex-direction:column;gap:12px">
+            <button class="btn btn-primary" style="justify-content:flex-start" onclick="accionDispositivo('descargar-eventos','Descargando eventos...')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Descargar eventos del MA300
+            </button>
+            <button class="btn btn-outline" style="justify-content:flex-start" onclick="accionDispositivo('sincronizar','Sincronizando usuarios...')">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+              Sincronizar usuarios al MA300
+            </button>
+            <button class="btn btn-outline" style="justify-content:flex-start" onclick="loadDispositivoInfo()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              Obtener info del dispositivo
+            </button>
+          </div>
+          <div class="card-header" style="margin-top:20px"><div class="card-title">Log de operaciones</div></div>
+          <div class="card-body">
+            <div id="op-log" style="background:var(--bg);border-radius:6px;padding:12px;font-family:var(--mono);font-size:11px;color:var(--accent);height:220px;overflow-y:auto;line-height:1.8">
+              <div>$ Iniciando sistema ZKControl...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script>
+// ─── Config ───────────────────────────────────────────────────────────────────
+const API = '';
+
+let _usuarios = [];
+let _marcaciones = [];
+let _dniActual = null;  // DNI del usuario recién guardado para la captura de huella
+
+// ─── API Fetch ────────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const res = await fetch(`${API}${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// ─── Estado API ───────────────────────────────────────────────────────────────
+async function checkApiStatus() {
+  const el = document.getElementById('api-status');
+  const txt = document.getElementById('api-status-text');
+  try {
+    await fetch(`${API}/usuarios`, { signal: AbortSignal.timeout(3000) });
+    el.className = 'api-status online';
+    txt.textContent = 'API · localhost:3000 · ONLINE';
+    syslog('✓ API conectada en localhost:3000');
+  } catch {
+    el.className = 'api-status offline';
+    txt.textContent = 'API · offline';
+    syslog('✗ No se puede conectar a localhost:3000');
+    toast('Backend no disponible. Inicia el servidor Node.js.', 'error');
+  }
+}
+
+// ─── Navegación ───────────────────────────────────────────────────────────────
+function showPage(id, el) {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('page-' + id).classList.add('active');
+  if (el) el.classList.add('active');
+  const loaders = { dashboard: loadDashboard, marcaciones: loadMarcaciones, usuarios: loadUsuarios, dispositivo: loadDispositivoInfo };
+  if (loaders[id]) loaders[id]();
+}
+
+function irARegistro() {
+  resetFormRegistro();
+  showPage('registro', document.getElementById('nav-registro'));
+}
+
+// ─── Dashboard ────────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  try {
+    const [usuarios, marcaciones, sinValidar] = await Promise.all([
+      api('/usuarios'),
+      api('/marcaciones'),
+      api('/marcaciones/sin-validar')
+    ]);
+
+    const hoy = new Date().toISOString().slice(0, 10);
+    const hoyCount = marcaciones.filter(m => (m.fecha_hora || '').startsWith(hoy)).length;
+
+    document.getElementById('stat-accesos').textContent     = hoyCount;
+    document.getElementById('stat-usuarios').textContent    = usuarios.length;
+    document.getElementById('stat-sinvalidar').textContent  = sinValidar.length;
+    document.getElementById('stat-total').textContent       = marcaciones.length;
+
+    // Feed en vivo — últimas 10
+    const feed = document.getElementById('live-feed');
+    const recientes = [...marcaciones].reverse().slice(0, 10);
+    feed.innerHTML = recientes.length
+      ? recientes.map(m => `
+          <div class="feed-item ${(m.tipo||'').toLowerCase()}">
+            <div class="feed-time">${(m.fecha_hora||'').split(' ')[1]||'—'}</div>
+            <div class="feed-name">${m.nombre||'Desconocido'} ${m.apellido||''}</div>
+            <div class="feed-dni">${m.dni||'—'}</div>
+            <span class="badge ${m.tipo==='ENTRADA'?'badge-green':'badge-blue'}">${m.tipo||'—'}</span>
+          </div>`).join('')
+      : '<div class="empty-state">No hay marcaciones aún</div>';
+
+    // Tabla resumen
+    const tbody = document.getElementById('tabla-dashboard');
+    const top5 = [...marcaciones].reverse().slice(0, 5);
+    tbody.innerHTML = top5.length
+      ? top5.map(m => `
+          <tr>
+            <td>${m.nombre||'Desconocido'} ${m.apellido||''}</td>
+            <td class="mono">${m.dni||'—'}</td>
+            <td class="mono">${(m.fecha_hora||'').split(' ')[1]||'—'}</td>
+            <td><span class="badge ${m.tipo==='ENTRADA'?'badge-green':'badge-blue'}">${m.tipo||'—'}</span></td>
+          </tr>`).join('')
+      : '<tr><td colspan="4"><div class="empty-state">Sin datos</div></td></tr>';
+
+  } catch (err) {
+    document.getElementById('live-feed').innerHTML = `<div class="error-state">⚠ Error al cargar datos<br><small>${err.message}</small></div>`;
+    toast('Error dashboard: ' + err.message, 'error');
+  }
+}
+
+// ─── Marcaciones ──────────────────────────────────────────────────────────────
+async function loadMarcaciones() {
+  const tbody = document.getElementById('tabla-marcaciones');
+  tbody.innerHTML = '<tr><td colspan="6"><div class="loading"><div class="spinner"></div>Cargando...</div></td></tr>';
+
+  const qs = new URLSearchParams();
+  const desde = document.getElementById('filtro-desde').value;
+  const hasta  = document.getElementById('filtro-hasta').value;
+  const dni    = document.getElementById('filtro-dni').value;
+  if (desde) qs.set('desde', desde);
+  if (hasta)  qs.set('hasta', hasta);
+  if (dni)    qs.set('dni', dni);
+
+  try {
+    let data = await api(`/marcaciones?${qs}`);
+    const tipo = document.getElementById('filtro-tipo').value;
+    if (tipo) data = data.filter(m => m.tipo === tipo);
+
+    _marcaciones = data;
+    document.getElementById('count-marcaciones').textContent = `${data.length} registros`;
+
+    tbody.innerHTML = data.length
+      ? data.map(m => `
+          <tr>
+            <td>${m.nombre||'Desconocido'} ${m.apellido||''}</td>
+            <td class="mono">${m.dni||'—'}</td>
+            <td class="mono">${m.fecha_hora||'—'}</td>
+            <td><span class="badge ${m.tipo==='ENTRADA'?'badge-green':'badge-blue'}">${m.tipo||'—'}</span></td>
+            <td>${m.dispositivo||'MA300'}</td>
+            <td><span class="badge ${m.estado==='VALIDADO'?'badge-green':'badge-red'}">${m.estado||'—'}</span></td>
+          </tr>`).join('')
+      : '<tr><td colspan="6"><div class="empty-state">No se encontraron marcaciones</div></td></tr>';
+
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="6"><div class="error-state">⚠ ${err.message}</div></td></tr>`;
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+function limpiarFiltros() {
+  ['filtro-desde','filtro-hasta','filtro-dni','filtro-tipo'].forEach(id => {
+    const el = document.getElementById(id);
+    el.value = '';
+  });
+  loadMarcaciones();
+}
+
+function exportarCSV() {
+  if (!_marcaciones.length) { toast('No hay datos para exportar', 'info'); return; }
+  const header = 'Nombre,Apellido,DNI,Fecha/Hora,Tipo,Dispositivo,Estado';
+  const rows = _marcaciones.map(m =>
+    [m.nombre||'',m.apellido||'',m.dni||'',m.fecha_hora||'',m.tipo||'',m.dispositivo||'',m.estado||''].join(',')
+  );
+  const blob = new Blob([[header,...rows].join('\n')], { type: 'text/csv' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `marcaciones_${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+  toast('CSV exportado', 'success');
+}
+
+// ─── Usuarios ─────────────────────────────────────────────────────────────────
+async function loadUsuarios() {
+  const tbody = document.getElementById('tabla-usuarios');
+  tbody.innerHTML = '<tr><td colspan="5"><div class="loading"><div class="spinner"></div>Cargando...</div></td></tr>';
+  try {
+    _usuarios = await api('/usuarios');
+    renderTablaUsuarios(_usuarios);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5"><div class="error-state">⚠ ${err.message}</div></td></tr>`;
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+function renderTablaUsuarios(data) {
+  const tbody = document.getElementById('tabla-usuarios');
+  tbody.innerHTML = data.length
+    ? data.map(u => `
+        <tr>
+          <td class="mono">${u.id||'—'}</td>
+          <td>${u.nombre||''} ${u.apellido||''}</td>
+          <td class="mono">${u.dni||'—'}</td>
+          <td class="mono">${u.badge_number||u.dni||'—'}</td>
+          <td>
+            <button class="btn btn-primary" style="padding:5px 10px;font-size:11px"
+              onclick="irACapturarHuella('${u.dni}','${u.nombre||''}','${u.apellido||''}')">
+              + Huella
+            </button>
+          </td>
+        </tr>`).join('')
+    : '<tr><td colspan="5"><div class="empty-state">No hay usuarios registrados</div></td></tr>';
+}
+
+function filtrarTablaUsuarios(q) {
+  const filtrado = _usuarios.filter(u =>
+    (u.nombre||'').toLowerCase().includes(q.toLowerCase()) ||
+    (u.apellido||'').toLowerCase().includes(q.toLowerCase()) ||
+    (u.dni||'').includes(q)
+  );
+  renderTablaUsuarios(filtrado);
+}
+
+// ─── Registro de usuario ──────────────────────────────────────────────────────
+function resetFormRegistro() {
+  ['reg-nombre','reg-apellido','reg-dni','reg-badge'].forEach(id => document.getElementById(id).value = '');
+  const msg = document.getElementById('reg-msg');
+  msg.style.display = 'none';
+  document.getElementById('btn-captura').disabled = true;
+  _dniActual = null;
+  resetScanner();
+}
+
+async function guardarUsuario() {
+  const nombre   = document.getElementById('reg-nombre').value.trim();
+  const apellido = document.getElementById('reg-apellido').value.trim();
+  const dni      = document.getElementById('reg-dni').value.trim();
+  const msg      = document.getElementById('reg-msg');
+
+  if (!nombre || !apellido || !dni) {
+    showMsg(msg, '✗ Completa todos los campos obligatorios', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-guardar');
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="width:14px;height:14px"></div> Guardando...';
+
+  try {
+    await api('/usuario', {
+      method: 'POST',
+      body: JSON.stringify({ dni, nombre, apellido })
+    });
+
+    _dniActual = dni;
+    document.getElementById('btn-captura').disabled = false;
+    showMsg(msg, `✓ Usuario ${nombre} ${apellido} registrado con DNI ${dni}. Ahora captura la huella.`, 'success');
+    toast(`✓ Usuario ${nombre} registrado`, 'success');
+    syslog(`Usuario registrado: ${nombre} ${apellido} · DNI ${dni}`);
+
+  } catch (err) {
+    showMsg(msg, '✗ Error: ' + err.message, 'error');
+    toast('Error al registrar: ' + err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>Guardar Usuario';
+  }
+}
+
+function showMsg(el, text, type) {
+  el.style.display = 'block';
+  el.textContent = text;
+  el.style.color = type === 'error' ? 'var(--danger)' : 'var(--accent)';
+}
+
+function irACapturarHuella(dni, nombre, apellido) {
+  document.getElementById('reg-dni').value = dni;
+  document.getElementById('reg-badge').value = dni;
+  document.getElementById('reg-nombre').value = nombre;
+  document.getElementById('reg-apellido').value = apellido;
+  _dniActual = dni;
+  document.getElementById('btn-captura').disabled = false;
+  showPage('registro', document.getElementById('nav-registro'));
+  toast(`Listo para capturar huella de ${nombre}`, 'info');
+}
+
+// ─── Scanner / SLK20R ────────────────────────────────────────────────────────
+async function iniciarCaptura() {
+  if (!_dniActual) { toast('Guarda el usuario primero', 'error'); return; }
+
+  setScanner('active', 'Coloca el dedo en el SLK20R...', 'CAPTURANDO', 'rgba(0,229,160,0.1)', 'var(--accent)');
+  document.getElementById('btn-captura').disabled = true;
+  syslog(`Iniciando captura de huella para DNI ${_dniActual}...`);
+
+  try {
+    // Llamada real al backend — este endpoint activa el SLK20R
+    // y espera hasta recibir las 3 lecturas exitosas
+    const res = await api('/captura-huella', {
+      method: 'POST',
+      body: JSON.stringify({ dni: _dniActual, intentos: 3 })
+    });
+
+    // Animar progreso visual (el backend ya habrá capturado)
+    for (let i = 1; i <= 3; i++) {
+      await delay(600);
+      document.getElementById('scanner-attempts').textContent = `${i} / 3 lecturas`;
+      document.getElementById('progress-fill').style.width = `${(i/3)*100}%`;
+      document.getElementById('scanner-status').textContent = `Lectura ${i} de 3 completada`;
+    }
+
+    setScanner('success', '✓ Huella registrada y sincronizada al MA300', 'REGISTRADA', 'rgba(0,229,160,0.1)', 'var(--accent)');
+    toast('✓ Huella capturada y sincronizada', 'success');
+    syslog(`✓ Huella registrada para DNI ${_dniActual}`);
+
+  } catch (err) {
+    setScanner('error', `✗ ${err.message}`, 'ERROR', 'rgba(255,59,92,0.1)', 'var(--danger)');
+    toast('Error en captura: ' + err.message, 'error');
+    syslog(`✗ Error captura: ${err.message}`);
+    document.getElementById('btn-captura').disabled = false;
+  }
+}
+
+function resetScanner() {
+  setScanner('', 'Guarda el usuario primero, luego captura la huella', 'INACTIVO', 'rgba(74,85,104,0.2)', '#4a5568');
+  document.getElementById('progress-fill').style.width = '0%';
+  document.getElementById('scanner-attempts').textContent = '0 / 3 lecturas';
+}
+
+function setScanner(ringClass, statusText, badgeText, badgeBg, badgeColor) {
+  document.getElementById('scanner-ring').className = `scanner-ring ${ringClass}`;
+  const s = document.getElementById('scanner-status');
+  s.className = `scanner-status ${ringClass}`;
+  s.textContent = statusText;
+  const b = document.getElementById('scanner-badge');
+  b.textContent = badgeText;
+  b.style.cssText = `background:${badgeBg};color:${badgeColor}`;
+}
+
+// ─── Dispositivo ──────────────────────────────────────────────────────────────
+async function loadDispositivoInfo() {
+  const infoEl = document.getElementById('ma300-info');
+  infoEl.innerHTML = '<div class="loading"><div class="spinner"></div>Cargando...</div>';
+  syslog('Obteniendo información del MA300...');
+
+  try {
+    const d = await api('/dispositivo/info');
+
+    document.getElementById('ma300-badge').textContent = 'ONLINE';
+    document.getElementById('ma300-badge').className = 'badge badge-green';
+
+    infoEl.innerHTML = `
+      <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span class="text-muted">Usuarios en dispositivo</span><span class="mono">${d.usuarios??'—'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span class="text-muted">Huellas registradas</span><span class="mono">${d.huellas??'—'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border)">
+        <span class="text-muted">Firmware</span><span class="mono">${d.firmware??'Ver 6.60'}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;padding:10px 0">
+        <span class="text-muted">IP</span><span class="mono">${d.ip??'192.168.18.251'}</span>
+      </div>`;
+
+    const slk = document.getElementById('slk-badge');
+    slk.textContent = d.slkConectado ? 'CONECTADO' : 'DESCONECTADO';
+    slk.className = d.slkConectado ? 'badge badge-green' : 'badge badge-red';
+
+    syslog(`✓ Info MA300: ${d.usuarios} usuarios, ${d.huellas} huellas`);
+
+  } catch (err) {
+    document.getElementById('ma300-badge').textContent = 'ERROR';
+    document.getElementById('ma300-badge').className = 'badge badge-red';
+    infoEl.innerHTML = `<div class="error-state">⚠ ${err.message}</div>`;
+    syslog(`✗ Error info MA300: ${err.message}`);
+  }
+}
+
+async function accionDispositivo(accion, label) {
+  syslog(label);
+  toast(label, 'info');
+  try {
+    const res = await api(`/dispositivo/${accion}`, { method: 'POST' });
+    const msg = res.mensaje || 'Completado';
+    syslog(`✓ ${msg}`);
+    toast(msg, 'success');
+    if (accion === 'descargar-eventos') loadMarcaciones();
+  } catch (err) {
+    syslog(`✗ Error: ${err.message}`);
+    toast('Error: ' + err.message, 'error');
+  }
+}
+
+// ─── Utilidades ───────────────────────────────────────────────────────────────
+function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function syslog(msg) {
+  const el = document.getElementById('op-log');
+  if (!el) return;
+  const div = document.createElement('div');
+  div.textContent = `$ [${new Date().toLocaleTimeString('es-PE')}] ${msg}`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+function toast(msg, type = 'info') {
+  const c = document.getElementById('toast-container');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  c.appendChild(el);
+  setTimeout(() => { el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 3500);
+}
+
+// ─── Endpoints que debes agregar al backend ───────────────────────────────────
+// GET  /dispositivo/info            → { usuarios, huellas, firmware, ip, slkConectado }
+// POST /dispositivo/descargar-eventos → { mensaje }
+// POST /dispositivo/sincronizar     → { mensaje }
+// POST /captura-huella              → body: { dni, intentos } → { ok, template }
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+checkApiStatus();
+loadDashboard();
+
+// Auto-refresh dashboard cada 30s
+setInterval(() => {
+  if (document.getElementById('page-dashboard').classList.contains('active')) loadDashboard();
+}, 30000);
+</script>
+</body>
+</html>
