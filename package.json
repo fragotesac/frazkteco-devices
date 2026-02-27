@@ -10,7 +10,9 @@
   "dependencies": {
     "better-sqlite3": "^9.4.3",
     "express": "^4.18.2",
-    "node-zklib": "^1.1.0"
+    "ffi-napi": "^4.0.3",
+    "node-zklib": "^1.1.0",
+    "ref-napi": "^3.0.3"
   },
   "devDependencies": {
     "nodemon": "^3.0.0"
