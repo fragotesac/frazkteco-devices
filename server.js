@@ -3,12 +3,35 @@ const path     = require('path');
 const Database = require('better-sqlite3');
 const ZKLib    = require('node-zklib');
 
+// ─── CRÍTICO: capturar errores internos de node-zklib que matan el proceso ────
+// node-zklib tiene un bug donde reply=null explota en zklibtcp.js:234
+// Este handler previene que el proceso muera
+process.on('uncaughtException', (err) => {
+  const msg = err?.message || String(err);
+  // Solo ignorar errores conocidos de zklib, relanzar el resto
+  if (msg.includes('subarray') || msg.includes('TIMEOUT') || msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET')) {
+    log(`⚠ [zklib] Error interno capturado (proceso protegido): ${msg}`);
+  } else {
+    log(`✗ Error no manejado: ${msg}`);
+    console.error(err);
+  }
+});
+
+process.on('unhandledRejection', (reason) => {
+  const msg = reason?.message || String(reason);
+  if (msg.includes('subarray') || msg.includes('TIMEOUT') || msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET')) {
+    log(`⚠ [zklib] Promise rechazada capturada: ${msg}`);
+  } else {
+    log(`✗ Promise no manejada: ${msg}`);
+  }
+});
+
 // ─── Config ───────────────────────────────────────────────────────────────────
-const PORT             = 3000;
-const MA300_IP         = '192.168.18.201';
-const MA300_PORT       = 4370;
-const ZK_TIMEOUT       = 15000; // 15s conexión
-const ZK_RECV_TIMEOUT  = 8000;  // 8s por operación
+const PORT            = 3000;
+const MA300_IP        = '192.168.18.201';
+const MA300_PORT      = 4370;
+const ZK_TIMEOUT      = 10000;
+const ZK_RECV_TIMEOUT = 5000;
 const SYNC_INTERVAL_MS = 5 * 60 * 1000;
 
 // ─── Base de datos ────────────────────────────────────────────────────────────
@@ -50,114 +73,125 @@ const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Logger ───────────────────────────────────────────────────────────────────
 function log(msg) {
   console.log(`[${new Date().toLocaleTimeString('es-PE')}] ${msg}`);
 }
 
-// ─── ZK Helper: conexión con cierre seguro ────────────────────────────────────
-// Resuelve el crash "Cannot read properties of null (reading 'subarray')"
-// que ocurre cuando el socket ya está muerto y se intenta disconnectar.
-async function zkConectar() {
+// ─── ZK: ejecutar UNA sola operación por conexión ────────────────────────────
+// La causa raíz del crash es que node-zklib no soporta bien múltiples
+// operaciones secuenciales en la misma sesión TCP con el MA300.
+// Solución: cada operación abre y cierra su propia conexión.
+async function zkEjecutar(operacion) {
   const zk = new ZKLib(MA300_IP, MA300_PORT, ZK_TIMEOUT, ZK_RECV_TIMEOUT);
-  await zk.createSocket();
-  return zk;
-}
+  let conectado = false;
 
-async function zkDesconectar(zk) {
-  if (!zk) return;
   try {
-    await zk.disconnect();
-  } catch {
-    // Si el socket ya está muerto, lo destruimos manualmente
-    try {
-      if (zk.connectionType === 'tcp' && zk.zklibtcp && zk.zklibtcp.socket) {
-        zk.zklibtcp.socket.destroy();
-      }
-      if (zk.connectionType === 'udp' && zk.zklibutil && zk.zklibutil.socket) {
-        zk.zklibutil.socket.close();
-      }
-    } catch {}
-  }
-}
-
-// Ejecuta una operación ZK y garantiza el cierre del socket pase lo que pase
-async function conZK(operacion) {
-  let zk;
-  try {
-    zk = await zkConectar();
+    await zk.createSocket();
+    conectado = true;
     const resultado = await operacion(zk);
-    await zkDesconectar(zk);
     return resultado;
   } catch (err) {
-    await zkDesconectar(zk);
-    throw err;
+    const msg = err?.err?.message || err?.message || String(err);
+    throw new Error(msg);
+  } finally {
+    // Cierre defensivo: nunca dejar el socket abierto
+    if (conectado) {
+      try {
+        await zk.disconnect();
+      } catch {
+        // Si disconnect falla, destruir el socket manualmente
+        try {
+          const tcp = zk.zklibtcp;
+          if (tcp && tcp.socket) {
+            tcp.socket.destroy();
+            tcp.socket = null;
+          }
+        } catch {}
+      }
+    }
   }
 }
 
-// ─── Sincronización automática ────────────────────────────────────────────────
+// Helper: ejecutar zkEjecutar con timeout de seguridad
+function zkConTimeout(operacion, ms = 20000) {
+  return Promise.race([
+    zkEjecutar(operacion),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout de ${ms}ms superado`)), ms)
+    )
+  ]);
+}
+
+// ─── Sincronización automática (dos conexiones separadas) ─────────────────────
 let sincronizando = false;
 
 async function sincronizarMarcaciones() {
-  if (sincronizando) return; // evitar ejecuciones concurrentes
+  if (sincronizando) return;
   sincronizando = true;
-  log('Sincronizando marcaciones desde MA300...');
+  log('Sincronizando desde MA300...');
 
+  // PASO 1: obtener usuarios (conexión propia)
+  let usersDevice = [];
   try {
-    await conZK(async (zk) => {
+    usersDevice = await zkConTimeout(async (zk) => {
+      const { data } = await zk.getUsers();
+      return data || [];
+    });
+    log(`  Usuarios en dispositivo: ${usersDevice.length}`);
 
-      // 1. Importar usuarios del dispositivo que no existan en BD
-      const { data: usersDevice } = await zk.getUsers();
-      const insertUsuario = db.prepare(`
-        INSERT OR IGNORE INTO usuarios (dni, nombre, badge_number)
-        VALUES (@dni, @nombre, @badge_number)
-      `);
-      for (const u of usersDevice) {
-        insertUsuario.run({
-          dni:          String(u.userId),
-          nombre:       u.name || String(u.userId),
-          badge_number: String(u.userId)
-        });
-      }
-      log(`  Usuarios en dispositivo: ${usersDevice.length}`);
+    const insertUsuario = db.prepare(`
+      INSERT OR IGNORE INTO usuarios (dni, nombre, badge_number)
+      VALUES (@dni, @nombre, @badge_number)
+    `);
+    for (const u of usersDevice) {
+      insertUsuario.run({
+        dni:          String(u.userId),
+        nombre:       u.name || String(u.userId),
+        badge_number: String(u.userId)
+      });
+    }
+  } catch (err) {
+    log(`✗ Error obteniendo usuarios: ${err.message}`);
+    sincronizando = false;
+    return;
+  }
 
-      // 2. Importar marcaciones nuevas
-      const { data: logs } = await zk.getAttendances();
-      const insertMarcacion = db.prepare(`
-        INSERT OR IGNORE INTO marcaciones (usuario_id, dni, fecha_hora, dispositivo, tipo)
-        SELECT u.id, @dni, @fecha_hora, @dispositivo, @tipo
-        FROM usuarios u
-        WHERE u.badge_number = @dni
-      `);
-
-      let nuevas = 0;
-      for (const l of logs) {
-        const r = insertMarcacion.run({
-          dni:         String(l.deviceUserId),
-          fecha_hora:  l.recordTime,
-          dispositivo: 'MA300',
-          tipo:        l.type === 0 ? 'ENTRADA' : 'SALIDA'
-        });
-        if (r.changes) nuevas++;
-      }
-
-      log(`✓ Sincronización completa: ${nuevas} nuevas de ${logs.length} marcaciones`);
+  // PASO 2: obtener marcaciones (conexión propia, separada)
+  try {
+    const logs = await zkConTimeout(async (zk) => {
+      const { data } = await zk.getAttendances();
+      return data || [];
     });
 
+    const insertMarcacion = db.prepare(`
+      INSERT OR IGNORE INTO marcaciones (usuario_id, dni, fecha_hora, dispositivo, tipo)
+      SELECT u.id, @dni, @fecha_hora, @dispositivo, @tipo
+      FROM usuarios u WHERE u.badge_number = @dni
+    `);
+
+    let nuevas = 0;
+    for (const l of logs) {
+      const r = insertMarcacion.run({
+        dni:         String(l.deviceUserId),
+        fecha_hora:  l.recordTime,
+        dispositivo: 'MA300',
+        tipo:        l.type === 0 ? 'ENTRADA' : 'SALIDA'
+      });
+      if (r.changes) nuevas++;
+    }
+
+    log(`✓ Sincronización completa: ${nuevas} nuevas de ${logs.length} marcaciones`);
   } catch (err) {
-    // Mostrar mensaje limpio sin el stack del ZKError
-    const msg = err?.err?.message || err?.message || String(err);
-    log(`✗ Error sincronizando MA300: ${msg}`);
+    log(`✗ Error obteniendo marcaciones: ${err.message}`);
   } finally {
     sincronizando = false;
   }
 }
 
-// Arrancar con delay de 2s para que Express levante primero
 setTimeout(sincronizarMarcaciones, 2000);
 setInterval(sincronizarMarcaciones, SYNC_INTERVAL_MS);
 
-// ─── RUTAS ────────────────────────────────────────────────────────────────────
+// ─── RUTAS API ────────────────────────────────────────────────────────────────
 
 // ── Usuarios ──────────────────────────────────────────────────────────────────
 app.get('/usuarios', (req, res) => {
@@ -186,10 +220,9 @@ app.post('/usuario', (req, res) => {
 app.get('/marcaciones', (req, res) => {
   const { desde, hasta, dni } = req.query;
   let query = `
-    SELECT
-      m.id, m.fecha_hora, m.tipo, m.dispositivo,
-      u.nombre, u.apellido, u.dni,
-      CASE WHEN u.id IS NOT NULL THEN 'VALIDADO' ELSE 'NO REGISTRADO' END AS estado
+    SELECT m.id, m.fecha_hora, m.tipo, m.dispositivo,
+           u.nombre, u.apellido, u.dni,
+           CASE WHEN u.id IS NOT NULL THEN 'VALIDADO' ELSE 'NO REGISTRADO' END AS estado
     FROM marcaciones m
     LEFT JOIN usuarios u ON m.dni = u.badge_number
     WHERE 1=1
@@ -227,7 +260,7 @@ app.post('/captura-huella', async (req, res) => {
   if (!usuario) return res.status(404).json({ error: 'Usuario no encontrado' });
 
   try {
-    // Placeholder — reemplazar con ZKFinger SDK cuando esté disponible
+    // Placeholder — reemplazar con ZKFinger SDK
     const template = Buffer.from(`template-${dni}-${Date.now()}`);
 
     const existe = db.prepare('SELECT id FROM huellas WHERE usuario_id = ?').get(usuario.id);
@@ -239,15 +272,14 @@ app.post('/captura-huella', async (req, res) => {
         .run(usuario.id, template);
     }
 
-    // Intentar sincronizar al MA300 (no crítico si falla)
+    // Sincronizar usuario al MA300 (conexión propia)
     try {
-      await conZK(async (zk) => {
+      await zkConTimeout(async (zk) => {
         await zk.setUser(parseInt(dni) || 0, dni, usuario.nombre, '', 0, 0);
-        log(`✓ Usuario ${usuario.nombre} sincronizado al MA300`);
       });
+      log(`✓ Usuario ${usuario.nombre} sincronizado al MA300`);
     } catch (zkErr) {
-      const msg = zkErr?.err?.message || zkErr?.message || String(zkErr);
-      log(`⚠ No se pudo sincronizar al MA300: ${msg}`);
+      log(`⚠ No se pudo sincronizar al MA300: ${zkErr.message}`);
     }
 
     res.json({ ok: true, mensaje: `Huella registrada para ${usuario.nombre}` });
@@ -259,77 +291,79 @@ app.post('/captura-huella', async (req, res) => {
 // ── Dispositivo ───────────────────────────────────────────────────────────────
 app.get('/dispositivo/info', async (req, res) => {
   try {
-    const resultado = await conZK(async (zk) => {
-      const info               = await zk.getInfo();
-      const { data: usuarios } = await zk.getUsers();
-      const { data: logs }     = await zk.getAttendances();
-      return {
-        ip:           MA300_IP,
-        puerto:       MA300_PORT,
-        firmware:     info.firmwareVersion || 'Ver 6.60',
-        usuarios:     usuarios.length,
-        huellas:      usuarios.filter(u => u.fingerprintCount > 0).length,
-        marcaciones:  logs.length,
-        slkConectado: false
-      };
+    // Tres conexiones separadas para evitar el crash de múltiples ops
+    const [usuarios, logs] = await Promise.all([
+      zkConTimeout(async (zk) => {
+        const { data } = await zk.getUsers();
+        return data || [];
+      }),
+      zkConTimeout(async (zk) => {
+        const { data } = await zk.getAttendances();
+        return data || [];
+      })
+    ]);
+
+    res.json({
+      ip:          MA300_IP,
+      puerto:      MA300_PORT,
+      firmware:    'Ver 6.60',
+      usuarios:    usuarios.length,
+      huellas:     usuarios.filter(u => u.fingerprintCount > 0).length,
+      marcaciones: logs.length,
+      slkConectado: false
     });
-    res.json(resultado);
   } catch (err) {
-    const msg = err?.err?.message || err?.message || String(err);
-    res.status(500).json({ error: `No se pudo conectar al MA300: ${msg}` });
+    res.status(500).json({ error: `No se pudo conectar al MA300: ${err.message}` });
   }
 });
 
 app.post('/dispositivo/descargar-eventos', async (req, res) => {
   try {
-    const resultado = await conZK(async (zk) => {
-      const { data: logs } = await zk.getAttendances();
-      const insert = db.prepare(`
-        INSERT OR IGNORE INTO marcaciones (usuario_id, dni, fecha_hora, dispositivo, tipo)
-        SELECT u.id, @dni, @fecha_hora, @dispositivo, @tipo
-        FROM usuarios u WHERE u.badge_number = @dni
-      `);
-      let nuevas = 0;
-      for (const l of logs) {
-        const r = insert.run({
-          dni:         String(l.deviceUserId),
-          fecha_hora:  l.recordTime,
-          dispositivo: 'MA300',
-          tipo:        l.type === 0 ? 'ENTRADA' : 'SALIDA'
-        });
-        if (r.changes) nuevas++;
-      }
-      return { nuevas, total: logs.length };
+    const logs = await zkConTimeout(async (zk) => {
+      const { data } = await zk.getAttendances();
+      return data || [];
     });
-    res.json({ ok: true, mensaje: `${resultado.nuevas} nuevas marcaciones descargadas (total: ${resultado.total})` });
+
+    const insert = db.prepare(`
+      INSERT OR IGNORE INTO marcaciones (usuario_id, dni, fecha_hora, dispositivo, tipo)
+      SELECT u.id, @dni, @fecha_hora, @dispositivo, @tipo
+      FROM usuarios u WHERE u.badge_number = @dni
+    `);
+
+    let nuevas = 0;
+    for (const l of logs) {
+      const r = insert.run({
+        dni:         String(l.deviceUserId),
+        fecha_hora:  l.recordTime,
+        dispositivo: 'MA300',
+        tipo:        l.type === 0 ? 'ENTRADA' : 'SALIDA'
+      });
+      if (r.changes) nuevas++;
+    }
+
+    res.json({ ok: true, mensaje: `${nuevas} nuevas marcaciones descargadas (total: ${logs.length})` });
   } catch (err) {
-    const msg = err?.err?.message || err?.message || String(err);
-    res.status(500).json({ error: msg });
+    res.status(500).json({ error: err.message });
   }
 });
 
 app.post('/dispositivo/sincronizar', async (req, res) => {
-  try {
-    const usuarios = db.prepare('SELECT * FROM usuarios').all();
-    let sincronizados = 0;
+  const usuarios = db.prepare('SELECT * FROM usuarios').all();
+  let sincronizados = 0;
 
-    await conZK(async (zk) => {
-      for (const u of usuarios) {
-        try {
-          await zk.setUser(parseInt(u.dni) || 0, u.dni, u.nombre, '', 0, 0);
-          sincronizados++;
-        } catch (e) {
-          const msg = e?.err?.message || e?.message || String(e);
-          log(`⚠ No se pudo sincronizar ${u.nombre}: ${msg}`);
-        }
-      }
-    });
-
-    res.json({ ok: true, mensaje: `${sincronizados} de ${usuarios.length} usuarios sincronizados al MA300` });
-  } catch (err) {
-    const msg = err?.err?.message || err?.message || String(err);
-    res.status(500).json({ error: msg });
+  // Sincronizar de a uno con conexión propia por usuario para no saturar el MA300
+  for (const u of usuarios) {
+    try {
+      await zkConTimeout(async (zk) => {
+        await zk.setUser(parseInt(u.dni) || 0, u.dni, u.nombre, '', 0, 0);
+      }, 8000);
+      sincronizados++;
+    } catch (e) {
+      log(`⚠ No se pudo sincronizar ${u.nombre}: ${e.message}`);
+    }
   }
+
+  res.json({ ok: true, mensaje: `${sincronizados} de ${usuarios.length} usuarios sincronizados al MA300` });
 });
 
 // ─── Inicio ───────────────────────────────────────────────────────────────────
